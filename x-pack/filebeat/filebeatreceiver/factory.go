@@ -64,6 +64,7 @@ func createLogsReceiver(_ context.Context, params receiver.CreateSettings, baseC
 		reg = monitoring.Default.NewRegistry("libbeat")
 	}
 
+	b.Beat.Info.LogsConsumer = consumer
 
         outputEnabled := b.Config.Output.IsSet() && b.Config.Output.Config().Enabled()
         if !outputEnabled {

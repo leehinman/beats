@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/gofrs/uuid"
+	"go.opentelemetry.io/collector/consumer"
 )
 
 // Info stores a beats instance meta data.
@@ -42,6 +43,7 @@ type Info struct {
 	Monitoring struct {
 		DefaultUsername string // The default username to be used to connect to Elasticsearch Monitoring
 	}
+	LogsConsumer consumer.Logs // otel logs consumer, used by otelconsumer output only
 }
 
 func (i Info) FQDNAwareHostname(useFQDN bool) string {
