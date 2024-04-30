@@ -32,7 +32,12 @@ func createDefaultConfig() component.Config {
 
 func createLogsReceiver(_ context.Context, params receiver.CreateSettings, baseCfg component.Config, consumer consumer.Logs) (receiver.Logs, error) {
 	logger := params.Logger
+	err := logp.ConfigureWithCore(logp.DefaultConfig(logp.DefaultEnvironment), params.Logger.Core())
+	if err != nil {
+		return nil, fmt.Errorf("Error configuring beats logp: %w", err)
+	}
 
+	logp.Warn("Did it work?")
 	cfg := baseCfg.(*Config)
 
 	// TODO x-pack/filebeat/cmd/root.go has Global Processors defined, probably need to bring those over
@@ -66,17 +71,17 @@ func createLogsReceiver(_ context.Context, params receiver.CreateSettings, baseC
 
 	b.Beat.Info.LogsConsumer = consumer
 
-        outputEnabled := b.Config.Output.IsSet() && b.Config.Output.Config().Enabled()
-        if !outputEnabled {
-                if b.Manager.Enabled() {
-                        logp.Info("Output is configured through Central Management")
-                } else {
-                        msg := "no outputs are defined, please define one under the output section"
-                        logp.Info(msg)
-                        return nil, fmt.Errorf(msg)
-                }
-        }
-	
+	outputEnabled := b.Config.Output.IsSet() && b.Config.Output.Config().Enabled()
+	if !outputEnabled {
+		if b.Manager.Enabled() {
+			logp.Info("Output is configured through Central Management")
+		} else {
+			msg := "no outputs are defined, please define one under the output section"
+			logp.Info(msg)
+			return nil, fmt.Errorf(msg)
+		}
+	}
+
 	monitors := pipeline.Monitors{
 		Metrics:   reg,
 		Telemetry: monitoring.GetNamespace("state").GetRegistry(),
@@ -99,7 +104,7 @@ func createLogsReceiver(_ context.Context, params receiver.CreateSettings, baseC
 
 	b.Publisher = publisher
 	fbBeater, err := fbCreator(&b.Beat, sub)
-	if err !=nil {
+	if err != nil {
 		return nil, fmt.Errorf("error getting filebeat creator:%w", err)
 	}
 	fmt.Fprintf(os.Stderr, "fbBeater is %v", fbBeater)

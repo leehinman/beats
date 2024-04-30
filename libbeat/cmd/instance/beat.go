@@ -1013,9 +1013,9 @@ func (b *Beat) ReceiverConfigure(settings Settings, receiverConfig map[string]in
 		return fmt.Errorf("error setting timestamp precision: %w", err)
 	}
 
-	if err := configure.Logging(b.Info.Beat, b.Config.Logging); err != nil {
-		return fmt.Errorf("error initializing logging: %w", err)
-	}
+	// if err := configure.Logging(b.Info.Beat, b.Config.Logging); err != nil {
+	// 	return fmt.Errorf("error initializing logging: %w", err)
+	// }
 
 	// log paths values to help with troubleshooting
 	logp.Info(paths.Paths.String())
