@@ -25,6 +25,7 @@ import (
 	"github.com/elastic/beats/v7/libbeat/outputs"
 	"github.com/elastic/beats/v7/libbeat/publisher"
 	"github.com/elastic/elastic-agent-libs/config"
+	"github.com/elastic/elastic-agent-libs/mapstr"
 
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/pcommon"
@@ -69,8 +70,15 @@ func (out *otelConsumer) Publish(_ context.Context, batch publisher.Batch) error
 	events := batch.Events()
 	for _, event := range events {
 		logRecord := logRecords.AppendEmpty()
+		if val, err := event.Content.Fields.GetValue("message"); err == nil {
+			if s, ok := val.(string); ok == true {
+				logRecord.Body().SetStr(s)
+			}
+			_ = event.Content.Fields.Delete("message")
+		}
 		logRecord.SetTimestamp(pcommon.NewTimestampFromTime(event.Content.Timestamp))
-		logRecord.Body().SetStr(event.Content.String())
+		attr := mapstr.Union(event.Content.Fields.Flatten(), event.Content.Meta.Flatten())
+		logRecord.Attributes().FromRaw(attr)
 	}
 	if err := out.logsConsumer.ConsumeLogs(context.TODO(), pLogs); err != nil {
 		return fmt.Errorf("error otel log consumer: %w", err)
@@ -83,4 +91,28 @@ func (out *otelConsumer) Publish(_ context.Context, batch publisher.Batch) error
 
 func (out *otelConsumer) String() string {
 	return "otelconsumer"
+}
+
+// Doesn't look like we need this since Attributes don't seem to be nested
+func mapstrToPcommonMap(m mapstr.M) (pcommon.Map) {
+	out := pcommon.NewMap()
+	for k,v := range m {
+		switch x := v.(type) {
+		case string:
+			out.PutStr(k, x)
+		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+			out.PutInt(k, x.(int64))
+		case float32, float64:
+			out.PutDouble(k, x.(float64))
+		case bool:
+			out.PutBool(k, x)
+		case mapstr.M:
+			dest := out.PutEmptyMap(k)
+			newMap := mapstrToPcommonMap(x)
+			newMap.CopyTo(dest)
+		default:
+			out.PutStr(k, fmt.Sprintf("unknown type: %T", x))
+		}
+	}
+	return out
 }

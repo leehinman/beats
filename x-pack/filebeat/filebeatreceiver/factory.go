@@ -3,7 +3,6 @@ package filebeatreceiver
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/elastic/beats/v7/filebeat/beater"
 	"github.com/elastic/beats/v7/filebeat/cmd"
@@ -107,7 +106,7 @@ func createLogsReceiver(_ context.Context, params receiver.CreateSettings, baseC
 	if err != nil {
 		return nil, fmt.Errorf("error getting filebeat creator:%w", err)
 	}
-	fmt.Fprintf(os.Stderr, "fbBeater is %v", fbBeater)
+
 	fbRcvr := &filebeatReceiver{
 		logger:       logger,
 		nextConsumer: consumer,
