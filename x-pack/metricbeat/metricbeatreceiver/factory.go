@@ -1,16 +1,15 @@
-package filebeatreceiver
+package metricbeatreceiver
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/elastic/beats/v7/filebeat/beater"
-	"github.com/elastic/beats/v7/filebeat/cmd"
-	inputs "github.com/elastic/beats/v7/filebeat/input/default-inputs"
 	"github.com/elastic/beats/v7/libbeat/cmd/instance"
 	"github.com/elastic/beats/v7/libbeat/common/reload"
 	"github.com/elastic/beats/v7/libbeat/plugin"
 	"github.com/elastic/beats/v7/libbeat/publisher/pipeline"
+	"github.com/elastic/beats/v7/metricbeat/beater"
+	"github.com/elastic/beats/v7/metricbeat/cmd"
 	"github.com/elastic/elastic-agent-libs/logp"
 	"github.com/elastic/elastic-agent-libs/monitoring"
 
@@ -20,27 +19,26 @@ import (
 )
 
 const (
-	typeStr = "filebeatreceiver"
+	typeStr = "metricbeatreceiver"
 )
 
 func createDefaultConfig() component.Config {
 	return &Config{
-		FakeString: "filebeatreceiver config default 'FakeString'",
+		FakeString: "metricbeatreceiver config default 'FakeString'",
 	}
 }
 
-func createLogsReceiver(_ context.Context, params receiver.CreateSettings, baseCfg component.Config, consumer consumer.Logs) (receiver.Logs, error) {
+func createMetricsReceiver(_ context.Context, params receiver.CreateSettings, baseCfg component.Config, consumer consumer.Metrics) (receiver.Metrics, error) {
 	logger := params.Logger
 	err := logp.ConfigureWithCore(logp.DefaultConfig(logp.DefaultEnvironment), params.Logger.Core())
 	if err != nil {
 		return nil, fmt.Errorf("Error configuring beats logp: %w", err)
 	}
 
-	logp.Warn("Did it work?")
 	cfg := baseCfg.(*Config)
 
 	// TODO x-pack/filebeat/cmd/root.go has Global Processors defined, probably need to bring those over
-	settings := cmd.FilebeatSettings()
+	settings := cmd.MetricbeatSettings()
 	settings.ElasticLicensed = true
 
 	b, err := instance.NewBeat(settings.Name, settings.IndexPrefix, settings.Version, settings.ElasticLicensed)
@@ -56,19 +54,19 @@ func createLogsReceiver(_ context.Context, params receiver.CreateSettings, baseC
 		return nil, fmt.Errorf("couldn't configure beat: %w", err)
 	}
 
-	fbCreator := beater.New(inputs.Init)
+	mbCreator := beater.DefaultCreator()
 
 	sub, err := b.BeatConfig()
 	if err != nil {
 		return nil, fmt.Errorf("unable to get beat config: %w", err)
 	}
 
-	reg := monitoring.Default.GetRegistry("filebeatreceiver")
+	reg := monitoring.Default.GetRegistry("metricbeatreceiver")
 	if reg == nil {
-		reg = monitoring.Default.NewRegistry("filebeatreceiver")
+		reg = monitoring.Default.NewRegistry("metricbeatreceiver")
 	}
 
-	b.Beat.Info.LogsConsumer = consumer
+	b.Beat.Info.MetricsConsumer = consumer
 
 	outputEnabled := b.Config.Output.IsSet() && b.Config.Output.Config().Enabled()
 	if !outputEnabled {
@@ -83,7 +81,7 @@ func createLogsReceiver(_ context.Context, params receiver.CreateSettings, baseC
 
 	monitors := pipeline.Monitors{
 		Metrics:   reg,
-		Telemetry: monitoring.GetNamespace("state").GetRegistry(),
+		Telemetry: monitoring.GetNamespace("metricbeatreceiverstate").GetRegistry(),
 		Logger:    logp.L().Named("publisher"),
 		Tracer:    b.Instrumentation.Tracer(),
 	}
@@ -99,23 +97,24 @@ func createLogsReceiver(_ context.Context, params receiver.CreateSettings, baseC
 		return nil, fmt.Errorf("error initializing publisher: %w", err)
 	}
 
-	reload.FilebeatRegisterV2.MustRegisterOutput(b.MakeOutputReloader(publisher.OutputReloader()))
+	reload.MetricbeatRegisterV2.MustRegisterOutput(b.MakeOutputReloader(publisher.OutputReloader()))
+	//reload.RegisterV2.Register(reload.OutputRegName, b.MakeOutputReloader(publisher.OutputReloader()))
 
 	b.Publisher = publisher
-	fbBeater, err := fbCreator(&b.Beat, sub)
+	mbBeater, err := mbCreator(&b.Beat, sub)
 	if err != nil {
 		return nil, fmt.Errorf("error getting filebeat creator:%w", err)
 	}
 
-	fbRcvr := &filebeatReceiver{
+	mbRcvr := &metricbeatReceiver{
 		logger:       logger,
 		nextConsumer: consumer,
 		config:       cfg,
 		beat:         &b.Beat,
-		beater:       fbBeater,
+		beater:       mbBeater,
 	}
 
-	return fbRcvr, nil
+	return mbRcvr, nil
 }
 
 // NewFactory creates a factory for tailtracer receiver.
@@ -123,6 +122,6 @@ func NewFactory() receiver.Factory {
 	return receiver.NewFactory(
 		component.MustNewType(typeStr),
 		createDefaultConfig,
-		receiver.WithLogs(createLogsReceiver, component.StabilityLevelAlpha))
+		receiver.WithMetrics(createMetricsReceiver, component.StabilityLevelAlpha))
 
 }

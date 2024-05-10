@@ -30,6 +30,7 @@ import (
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/pdata/pmetric"
 )
 
 func init() {
@@ -37,15 +38,17 @@ func init() {
 }
 
 type otelConsumer struct {
-	observer     outputs.Observer
-	logsConsumer consumer.Logs
+	observer        outputs.Observer
+	logsConsumer    consumer.Logs
+	metricsConsumer consumer.Metrics
 }
 
 func makeOtelConsumer(_ outputs.IndexManager, beat beat.Info, observer outputs.Observer, cfg *config.C) (outputs.Group, error) {
 
 	out := &otelConsumer{
-		observer:     observer,
-		logsConsumer: beat.LogsConsumer,
+		observer:        observer,
+		logsConsumer:    beat.LogsConsumer,
+		metricsConsumer: beat.MetricsConsumer,
 	}
 
 	ocConfig := defaultConfig()
@@ -59,7 +62,18 @@ func (out *otelConsumer) Close() error {
 	return nil
 }
 
-func (out *otelConsumer) Publish(_ context.Context, batch publisher.Batch) error {
+func (out *otelConsumer) Publish(ctx context.Context, batch publisher.Batch) error {
+	switch {
+	case out.logsConsumer != nil:
+		return out.logsPublish(ctx, batch)
+	case out.metricsConsumer != nil:
+		return out.metricsPublish(ctx, batch)
+	default:
+		panic(fmt.Errorf("an otel consumer must be specified"))
+	}
+}
+
+func (out *otelConsumer) logsPublish(_ context.Context, batch publisher.Batch) error {
 	defer batch.ACK()
 	st := out.observer
 	pLogs := plog.NewLogs()
@@ -89,30 +103,29 @@ func (out *otelConsumer) Publish(_ context.Context, batch publisher.Batch) error
 	return nil
 }
 
-func (out *otelConsumer) String() string {
-	return "otelconsumer"
+func (out *otelConsumer) metricsPublish(_ context.Context, batch publisher.Batch) error {
+	defer batch.ACK()
+	st := out.observer
+	pMetrics := pmetric.NewMetrics()
+	resourceMetrics := pMetrics.ResourceMetrics().AppendEmpty()
+
+	events := batch.Events()
+	for _, event := range events {
+		attr := mapstr.Union(event.Content.Fields.Flatten(), event.Content.Meta.Flatten())
+		resourceMetrics.Resource().Attributes().FromRaw(attr)
+		m := resourceMetrics.ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
+		m.SetName("test_metric")
+		m.SetEmptyGauge().DataPoints().AppendEmpty()
+	}
+	if err := out.metricsConsumer.ConsumeMetrics(context.TODO(), pMetrics); err != nil {
+		return fmt.Errorf("error otel metric consumer: %w", err)
+	}
+	// Here is where we convert to otel pdata.Logs
+	st.NewBatch(len(events))
+	st.Acked(len(events))
+	return nil
 }
 
-// Doesn't look like we need this since Attributes don't seem to be nested
-func mapstrToPcommonMap(m mapstr.M) (pcommon.Map) {
-	out := pcommon.NewMap()
-	for k,v := range m {
-		switch x := v.(type) {
-		case string:
-			out.PutStr(k, x)
-		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
-			out.PutInt(k, x.(int64))
-		case float32, float64:
-			out.PutDouble(k, x.(float64))
-		case bool:
-			out.PutBool(k, x)
-		case mapstr.M:
-			dest := out.PutEmptyMap(k)
-			newMap := mapstrToPcommonMap(x)
-			newMap.CopyTo(dest)
-		default:
-			out.PutStr(k, fmt.Sprintf("unknown type: %T", x))
-		}
-	}
-	return out
+func (out *otelConsumer) String() string {
+	return "otelconsumer"
 }

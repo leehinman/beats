@@ -43,7 +43,8 @@ type Info struct {
 	Monitoring struct {
 		DefaultUsername string // The default username to be used to connect to Elasticsearch Monitoring
 	}
-	LogsConsumer consumer.Logs // otel logs consumer, used by otelconsumer output only
+	LogsConsumer    consumer.Logs    // otel logs consumer, used by otelconsumer output only
+	MetricsConsumer consumer.Metrics // otel metrics consumer, used by otelconsumer output only
 }
 
 func (i Info) FQDNAwareHostname(useFQDN bool) string {

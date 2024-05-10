@@ -28,6 +28,8 @@ import (
 
 // RegisterV2 is the special registry used for the V2 controller
 var RegisterV2 = NewRegistry()
+var FilebeatRegisterV2 = NewRegistry()
+var MetricbeatRegisterV2 = NewRegistry()
 
 // InputRegName is the registation name for V2 inputs
 const InputRegName = "input"

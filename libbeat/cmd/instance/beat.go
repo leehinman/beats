@@ -410,7 +410,14 @@ func (b *Beat) createBeater(bt beat.Creator) (beat.Beater, error) {
 		return nil, fmt.Errorf("error initializing publisher: %w", err)
 	}
 
-	reload.RegisterV2.MustRegisterOutput(b.makeOutputReloader(publisher.OutputReloader()))
+	switch b.Beat.Info.Beat {
+	case "filebeat":
+		reload.FilebeatRegisterV2.MustRegisterOutput(b.makeOutputReloader(publisher.OutputReloader()))
+	case "metricbeat" :
+		reload.MetricbeatRegisterV2.MustRegisterOutput(b.makeOutputReloader(publisher.OutputReloader()))	
+	default:
+		reload.RegisterV2.MustRegisterOutput(b.makeOutputReloader(publisher.OutputReloader()))
+	}
 
 	// TODO: some beats race on shutdown with publisher.Stop -> do not call Stop yet,
 	//       but refine publisher to disconnect clients on stop automatically
@@ -611,7 +618,9 @@ func (b *Beat) RegisterHostname(useFQDN bool) {
 
 	// state.host
 	stateRegistry := monitoring.GetNamespace("state").GetRegistry()
-	monitoring.NewFunc(stateRegistry, "host", host.ReportInfo(hostname), monitoring.Report)
+	if prs := stateRegistry.Get("host"); prs == nil {
+		monitoring.NewFunc(stateRegistry, "host", host.ReportInfo(hostname), monitoring.Report)
+	}
 }
 
 // TestConfig check all settings are ok and the beat can be run
@@ -860,9 +869,23 @@ func (b *Beat) configure(settings Settings) error {
 	}
 
 	// initialize config manager
-	m, err := management.NewManager(b.Config.Management, reload.RegisterV2)
-	if err != nil {
-		return err
+	var m management.Manager
+	switch b.Info.Beat {
+	case "filebeat":
+		m, err = management.NewManager(b.Config.Management, reload.FilebeatRegisterV2)
+		if err != nil {
+			return err
+		}
+	case "metricbeat":
+		m, err = management.NewManager(b.Config.Management, reload.MetricbeatRegisterV2)
+		if err != nil {
+			return err
+		}
+	default:
+		m, err = management.NewManager(b.Config.Management, reload.RegisterV2)
+		if err != nil {
+			return err
+		}
 	}
 	b.Manager = m
 
