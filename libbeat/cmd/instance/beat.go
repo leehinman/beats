@@ -329,6 +329,21 @@ func (b *Beat) Keystore() keystore.Keystore {
 	return b.keystore
 }
 
+// Processors return the configured keystore for this beat
+func (b *Beat) Processors() processing.Supporter {
+	return b.processors
+}
+
+// MakeOutputReloader does what it says
+func (b *Beat) MakeOutputReloader(outReloader pipeline.OutputReloader) reload.Reloadable {
+	return b.makeOutputReloader(outReloader)
+}
+
+// MakeOutputFactory does what it says
+func (b *Beat) MakeOutputFactory(cfg config.Namespace) func(outputs.Observer) (string, outputs.Group, error) {
+	return b.makeOutputFactory(cfg)
+}
+
 // create and return the beater, this method also initializes all needed items,
 // including template registering, publisher, xpack monitoring
 func (b *Beat) createBeater(bt beat.Creator) (beat.Beater, error) {
@@ -889,6 +904,182 @@ func (b *Beat) configure(settings Settings) error {
 		logp.Info("Set gc percentage to: %v", gcPercent)
 		debug.SetGCPercent(gcPercent)
 	}
+
+	b.Beat.BeatConfig, err = b.BeatConfig()
+	if err != nil {
+		return err
+	}
+
+	imFactory := settings.IndexManagement
+	if imFactory == nil {
+		imFactory = idxmgmt.MakeDefaultSupport(settings.ILM)
+	}
+	b.IdxSupporter, err = imFactory(nil, b.Beat.Info, b.RawConfig)
+	if err != nil {
+		return err
+	}
+
+	processingFactory := settings.Processing
+	if processingFactory == nil {
+		processingFactory = processing.MakeDefaultBeatSupport(true)
+	}
+	b.processors, err = processingFactory(b.Info, logp.L().Named("processors"), b.RawConfig)
+
+	b.Manager.RegisterDiagnosticHook("global processors", "a list of currently configured global beat processors",
+		"global_processors.txt", "text/plain", b.agentDiagnosticHook)
+	b.Manager.RegisterDiagnosticHook("beat_metrics", "Metrics from the default monitoring namespace and expvar.",
+		"beat_metrics.json", "application/json", func() []byte {
+			m := monitoring.CollectStructSnapshot(monitoring.Default, monitoring.Full, true)
+			data, err := json.MarshalIndent(m, "", "  ")
+			if err != nil {
+				logp.L().Warnw("Failed to collect beat metric snapshot for Agent diagnostics.", "error", err)
+				return []byte(err.Error())
+			}
+			return data
+		})
+
+	return err
+}
+
+// ReceiverConfigure reads the configuration file from disk, parses the common options
+// defined in BeatConfig, initializes logging, and set GOMAXPROCS if defined
+// in the config. Lastly it invokes the Config method implemented by the beat.
+func (b *Beat) ReceiverConfigure(settings Settings, receiverConfig map[string]interface{}) error {
+	var err error
+
+	b.InputQueueSize = settings.InputQueueSize
+
+	cfOpts := []ucfg.Option{
+		ucfg.PathSep("."),
+		ucfg.ResolveEnv,
+		ucfg.VarExp,
+	}
+	bob, err := ucfg.NewFrom(receiverConfig, cfOpts...)
+	cfg := (*config.C)(bob)
+
+	if err := initPaths(cfg); err != nil {
+		return err
+	}
+
+	// We have to initialize the keystore before any unpack or merging the cloud
+	// options.
+	store, err := LoadKeystore(cfg, b.Info.Beat)
+	if err != nil {
+		return fmt.Errorf("could not initialize the keystore: %w", err)
+	}
+
+	if settings.DisableConfigResolver {
+		config.OverwriteConfigOpts(obfuscateConfigOpts())
+	} else {
+		// TODO: Allow the options to be more flexible for dynamic changes
+		config.OverwriteConfigOpts(configOpts(store))
+	}
+
+	instrumentation, err := instrumentation.New(cfg, b.Info.Beat, b.Info.Version)
+	if err != nil {
+		return err
+	}
+	b.Beat.Instrumentation = instrumentation
+
+	b.keystore = store
+	b.Beat.Keystore = store
+	err = cloudid.OverwriteSettings(cfg)
+	if err != nil {
+		return err
+	}
+
+	b.RawConfig = cfg
+	err = cfg.Unpack(&b.Config)
+	if err != nil {
+		return fmt.Errorf("error unpacking config data: %w", err)
+	}
+
+	if err := promoteOutputQueueSettings(&b.Config); err != nil {
+		return fmt.Errorf("could not promote output queue settings: %w", err)
+	}
+
+	if err := features.UpdateFromConfig(b.RawConfig); err != nil {
+		return fmt.Errorf("could not parse features: %w", err)
+	}
+	b.RegisterHostname(features.FQDN())
+
+	b.Beat.Config = &b.Config.BeatConfig
+
+	if name := b.Config.Name; name != "" {
+		b.Info.Name = name
+	}
+
+	if err := common.SetTimestampPrecision(b.Config.TimestampPrecision); err != nil {
+		return fmt.Errorf("error setting timestamp precision: %w", err)
+	}
+
+	if err := configure.Logging(b.Info.Beat, b.Config.Logging); err != nil {
+		return fmt.Errorf("error initializing logging: %w", err)
+	}
+
+	// log paths values to help with troubleshooting
+	logp.Info(paths.Paths.String())
+
+	metaPath := paths.Resolve(paths.Data, "meta.json")
+	err = b.loadMeta(metaPath)
+	if err != nil {
+		return err
+	}
+
+	logp.Info("Beat ID: %v", b.Info.ID)
+
+	// Try to get the host's FQDN and set it.
+	h, err := sysinfo.Host()
+	if err != nil {
+		return fmt.Errorf("failed to get host information: %w", err)
+	}
+
+	fqdnLookupCtx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+
+	fqdn, err := h.FQDNWithContext(fqdnLookupCtx)
+	if err != nil {
+		// FQDN lookup is "best effort".  We log the error, fallback to
+		// the OS-reported hostname, and move on.
+		logp.Warn("unable to lookup FQDN: %s, using hostname = %s as FQDN", err.Error(), b.Info.Hostname)
+		b.Info.FQDN = b.Info.Hostname
+	} else {
+		b.Info.FQDN = fqdn
+	}
+
+	// initialize config manager
+	m, err := management.NewManager(b.Config.Management, reload.RegisterV2)
+	if err != nil {
+		return err
+	}
+	b.Manager = m
+
+	if b.Manager.AgentInfo().Version != "" {
+		// During the manager initialization the client to connect to the agent is
+		// also initialized. That makes the beat to read information sent by the
+		// agent, which includes the AgentInfo with the agent's package version.
+		// Components running under agent should report the agent's package version
+		// as their own version.
+		// In order to do so b.Info.Version needs to be set to the version the agent
+		// sent. As this Beat instance is initialized much before the package
+		// version is received, it's overridden here. So far it's early enough for
+		// the whole beat to report the right version.
+		b.Info.Version = b.Manager.AgentInfo().Version
+		version.SetPackageVersion(b.Info.Version)
+	}
+
+	if err := b.Manager.CheckRawConfig(b.RawConfig); err != nil {
+		return err
+	}
+
+	// if maxProcs := b.Config.MaxProcs; maxProcs > 0 {
+	// 	logp.Info("Set max procs limit: %v", maxProcs)
+	// 	runtime.GOMAXPROCS(maxProcs)
+	// }
+	// if gcPercent := b.Config.GCPercent; gcPercent > 0 {
+	// 	logp.Info("Set gc percentage to: %v", gcPercent)
+	// 	debug.SetGCPercent(gcPercent)
+	// }
 
 	b.Beat.BeatConfig, err = b.BeatConfig()
 	if err != nil {
