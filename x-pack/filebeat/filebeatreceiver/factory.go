@@ -43,7 +43,7 @@ func createLogsReceiver(_ context.Context, params receiver.CreateSettings, baseC
 	settings := cmd.FilebeatSettings()
 	settings.ElasticLicensed = true
 
-	b, err := instance.NewBeat(settings.Name, settings.IndexPrefix, settings.Version, settings.ElasticLicensed)
+	b, err := instance.NewBeat(settings.Name, settings.IndexPrefix, settings.Version, settings.ElasticLicensed, settings.Initialize)
 	if err != nil {
 		return nil, err
 	}

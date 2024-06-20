@@ -107,7 +107,7 @@ func (out *otelConsumer) logsPublish(_ context.Context, batch publisher.Batch) e
 	}
 	// Here is where we convert to otel pdata.Logs
 	st.NewBatch(len(events))
-	st.Acked(len(events))
+	st.AckedEvents(len(events))
 	return nil
 }
 
@@ -130,7 +130,7 @@ func (out *otelConsumer) metricsPublish(_ context.Context, batch publisher.Batch
 	}
 	// Here is where we convert to otel pdata.Logs
 	st.NewBatch(len(events))
-	st.Acked(len(events))
+	st.AckedEvents(len(events))
 	return nil
 }
 
