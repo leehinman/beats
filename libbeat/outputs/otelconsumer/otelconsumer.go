@@ -20,7 +20,6 @@ package otelconsumer
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/elastic/beats/v7/libbeat/beat"
@@ -32,7 +31,6 @@ import (
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
-	"go.opentelemetry.io/collector/pdata/pmetric"
 )
 
 func init() {
@@ -70,8 +68,6 @@ func (out *otelConsumer) Publish(ctx context.Context, batch publisher.Batch) err
 	switch {
 	case out.logsConsumer != nil:
 		return out.logsPublish(ctx, batch)
-	case out.metricsConsumer != nil:
-		return out.metricsPublish(ctx, batch)
 	default:
 		panic(fmt.Errorf("an otel consumer must be specified"))
 	}
@@ -87,8 +83,8 @@ func (out *otelConsumer) logsPublish(_ context.Context, batch publisher.Batch) e
 
 	events := batch.Events()
 	for _, event := range events {
-		fmt.Fprintf(os.Stderr, "Got Event: %v\n", event.Content)
 		logRecord := logRecords.AppendEmpty()
+		logRecord.Attributes().PutBool("BeatReceiver", true)
 		meta := event.Content.Meta.Clone()
 		meta["beat"] = out.beatInfo.Beat
 		meta["version"] = out.beatInfo.Version
@@ -97,36 +93,12 @@ func (out *otelConsumer) logsPublish(_ context.Context, batch publisher.Batch) e
 		beatEvent := event.Content.Fields.Clone()
 		beatEvent["@timestamp"] = event.Content.Timestamp
 		beatEvent["@metadata"] = meta
-		fmt.Fprintf(os.Stderr, "beatEvent: %v\n", beatEvent)
 		logRecord.SetTimestamp(pcommon.NewTimestampFromTime(event.Content.Timestamp))
 		pcommonEvent := mapstrToPcommonMap(beatEvent)
 		pcommonEvent.CopyTo(logRecord.Body().SetEmptyMap())
 	}
 	if err := out.logsConsumer.ConsumeLogs(context.TODO(), pLogs); err != nil {
 		return fmt.Errorf("error otel log consumer: %w", err)
-	}
-	// Here is where we convert to otel pdata.Logs
-	st.NewBatch(len(events))
-	st.AckedEvents(len(events))
-	return nil
-}
-
-func (out *otelConsumer) metricsPublish(_ context.Context, batch publisher.Batch) error {
-	defer batch.ACK()
-	st := out.observer
-	pMetrics := pmetric.NewMetrics()
-	resourceMetrics := pMetrics.ResourceMetrics().AppendEmpty()
-
-	events := batch.Events()
-	for _, event := range events {
-		attr := mapstr.Union(event.Content.Fields.Flatten(), event.Content.Meta.Flatten())
-		resourceMetrics.Resource().Attributes().FromRaw(attr)
-		m := resourceMetrics.ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
-		m.SetName("test_metric")
-		m.SetEmptyGauge().DataPoints().AppendEmpty()
-	}
-	if err := out.metricsConsumer.ConsumeMetrics(context.TODO(), pMetrics); err != nil {
-		return fmt.Errorf("error otel metric consumer: %w", err)
 	}
 	// Here is where we convert to otel pdata.Logs
 	st.NewBatch(len(events))
@@ -144,10 +116,30 @@ func mapstrToPcommonMap(m mapstr.M) pcommon.Map {
 		switch x := v.(type) {
 		case string:
 			out.PutStr(k, x)
-		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
-			out.PutInt(k, x.(int64))
-		case float32, float64:
-			out.PutDouble(k, x.(float64))
+		case int:
+			out.PutInt(k, int64(v.(int)))
+		case int8:
+			out.PutInt(k, int64(v.(int8)))
+		case int16:
+			out.PutInt(k, int64(v.(int16)))
+		case int32:
+			out.PutInt(k, int64(v.(int32)))
+		case int64:
+			out.PutInt(k, v.(int64))
+		case uint:
+			out.PutInt(k, int64(v.(uint)))
+		case uint8:
+			out.PutInt(k, int64(v.(uint8)))
+		case uint16:
+			out.PutInt(k, int64(v.(uint16)))
+		case uint32:
+			out.PutInt(k, int64(v.(uint32)))
+		case uint64:
+			out.PutInt(k, int64(v.(uint64)))
+		case float32:
+			out.PutDouble(k, float64(v.(float32)))
+		case float64:
+			out.PutDouble(k, v.(float64))
 		case bool:
 			out.PutBool(k, x)
 		case mapstr.M:

@@ -15,7 +15,7 @@ type metricbeatReceiver struct {
 	cancel       context.CancelFunc
 	logger       *zap.Logger
 	config       *Config
-	nextConsumer consumer.Metrics
+	nextConsumer consumer.Logs
 	beat         *beat.Beat
 	beater       beat.Beater
 }

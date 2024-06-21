@@ -28,7 +28,7 @@ func createDefaultConfig() component.Config {
 	}
 }
 
-func createMetricsReceiver(_ context.Context, params receiver.CreateSettings, baseCfg component.Config, consumer consumer.Metrics) (receiver.Metrics, error) {
+func createLogsReceiver(_ context.Context, params receiver.CreateSettings, baseCfg component.Config, consumer consumer.Logs) (receiver.Logs, error) {
 	logger := params.Logger
 	err := logp.ConfigureWithCore(logp.DefaultConfig(logp.DefaultEnvironment), params.Logger.Core())
 	if err != nil {
@@ -41,7 +41,7 @@ func createMetricsReceiver(_ context.Context, params receiver.CreateSettings, ba
 	settings := cmd.MetricbeatSettings()
 	settings.ElasticLicensed = true
 
-	b, err := instance.NewBeat(settings.Name, settings.IndexPrefix, settings.Version, settings.ElasticLicensed)
+	b, err := instance.NewBeat(settings.Name, settings.IndexPrefix, settings.Version, settings.ElasticLicensed, settings.Initialize)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +66,7 @@ func createMetricsReceiver(_ context.Context, params receiver.CreateSettings, ba
 		reg = monitoring.Default.NewRegistry("metricbeatreceiver")
 	}
 
-	b.Beat.Info.MetricsConsumer = consumer
+	b.Beat.Info.LogsConsumer = consumer
 
 	outputEnabled := b.Config.Output.IsSet() && b.Config.Output.Config().Enabled()
 	if !outputEnabled {
@@ -103,7 +103,7 @@ func createMetricsReceiver(_ context.Context, params receiver.CreateSettings, ba
 	b.Publisher = publisher
 	mbBeater, err := mbCreator(&b.Beat, sub)
 	if err != nil {
-		return nil, fmt.Errorf("error getting filebeat creator:%w", err)
+		return nil, fmt.Errorf("error getting metricbeat creator:%w", err)
 	}
 
 	mbRcvr := &metricbeatReceiver{
@@ -122,6 +122,6 @@ func NewFactory() receiver.Factory {
 	return receiver.NewFactory(
 		component.MustNewType(typeStr),
 		createDefaultConfig,
-		receiver.WithMetrics(createMetricsReceiver, component.StabilityLevelAlpha))
+		receiver.WithLogs(createLogsReceiver, component.StabilityLevelAlpha))
 
 }
