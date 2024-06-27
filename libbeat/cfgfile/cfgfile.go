@@ -33,7 +33,7 @@ var (
 	// The default config cannot include the beat name as it is not initialized
 	// when this variable is created. See ChangeDefaultCfgfileFlag which should
 	// be called prior to flags.Parse().
-	configfiles = config.StringArrFlag(nil, "c", "beat.yml", "Configuration file, relative to path.config")
+	configfiles = config.StringArrFlag(nil, "beatconfig", "beat.yml", "Configuration file, relative to path.config")
 	overwrites  = config.SettingFlag(nil, "E", "Configuration overwrite")
 
 	// Additional default settings, that must be available for variable expansion
