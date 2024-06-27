@@ -33,16 +33,16 @@ var (
 	// The default config cannot include the beat name as it is not initialized
 	// when this variable is created. See ChangeDefaultCfgfileFlag which should
 	// be called prior to flags.Parse().
-	configfiles = config.StringArrFlag(nil, "c", "beat.yml", "Configuration file, relative to path.config")
+	configfiles = config.StringArrFlag(nil, "beatconfig", "beat.yml", "Configuration file, relative to path.config")
 	overwrites  = config.SettingFlag(nil, "E", "Configuration overwrite")
 
 	// Additional default settings, that must be available for variable expansion
 	defaults = config.MustNewConfigFrom(map[string]interface{}{
 		"path": map[string]interface{}{
 			"home":   ".", // to be initialized by beat
-			"config": "${path.home}",
-			"data":   fmt.Sprint("${path.home}", string(os.PathSeparator), "data"),
-			"logs":   fmt.Sprint("${path.home}", string(os.PathSeparator), "logs"),
+			"config": "${beatpath.home}",
+			"data":   fmt.Sprint("${beatpath.home}", string(os.PathSeparator), "data"),
+			"logs":   fmt.Sprint("${beatpath.home}", string(os.PathSeparator), "logs"),
 		},
 	})
 
@@ -57,10 +57,10 @@ func init() {
 		return config.ConfigOverwriteFlag(nil, overwrites, name, name, "", usage)
 	}
 
-	homePath = makePathFlag("path.home", "Home path")
-	configPath = makePathFlag("path.config", "Configuration path")
-	makePathFlag("path.data", "Data path")
-	makePathFlag("path.logs", "Logs path")
+	homePath = makePathFlag("beatpath.home", "Home path")
+	configPath = makePathFlag("beatpath.config", "Configuration path")
+	makePathFlag("beatpath.data", "Data path")
+	makePathFlag("beatpath.logs", "Logs path")
 }
 
 // OverrideChecker checks if a config should be overwritten.
@@ -108,7 +108,7 @@ func HandleFlags() error {
 		home = *homePath
 	}
 
-	_ = defaults.SetString("path.home", -1, home)
+	_ = defaults.SetString("beatpath.home", -1, home)
 
 	if len(overwrites.GetFields()) > 0 {
 		common.PrintConfigDebugf(overwrites, "CLI setting overwrites (-E flag):")
