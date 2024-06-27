@@ -27,6 +27,7 @@ import (
 // The management setting is stored in the main Beat runtime object, but we can't see that from a module
 // So instead we check the CLI flags, since Agent starts filebeat/metricbeat with "-E", "management.enabled=true"
 func Enabled() bool {
+	//This needs to be fixed for BeatReceivers and we can't look at CLI flags
 	type management struct {
 		Enabled bool `config:"management.enabled"`
 	}
