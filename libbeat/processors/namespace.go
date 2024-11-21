@@ -38,6 +38,11 @@ type pluginer interface {
 	Plugin() Constructor
 }
 
+var (
+	ErrExistsAlready           error = errors.New("exists already")
+	ErrPluginAlreadyRegistered error = errors.New("non-namespace plugin already registered")
+)
+
 func NewNamespace() *Namespace {
 	return &Namespace{
 		reg: map[string]pluginer{},
@@ -59,7 +64,7 @@ func (ns *Namespace) add(names []string, p pluginer) error {
 	// register plugin if intermediate node in path being processed
 	if len(names) == 1 {
 		if _, found := ns.reg[name]; found {
-			return fmt.Errorf("%v exists already", name)
+			return fmt.Errorf("%s %w", name, ErrExistsAlready)
 		}
 
 		ns.reg[name] = p
@@ -71,7 +76,7 @@ func (ns *Namespace) add(names []string, p pluginer) error {
 	if found {
 		ns, ok := tmp.(*Namespace)
 		if !ok {
-			return errors.New("non-namespace plugin already registered")
+			return ErrPluginAlreadyRegistered
 		}
 		return ns.add(names[1:], p)
 	}
