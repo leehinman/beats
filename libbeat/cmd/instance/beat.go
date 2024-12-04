@@ -337,6 +337,8 @@ func NewBeatReceiver(settings Settings, receiverConfig map[string]interface{}, c
 		config.OverwriteConfigOpts(configOpts(store))
 	}
 
+	b.Beat.MonitorRegistry = monitoring.GetNamespace(b.Info.Beat + "-" + b.Info.ID.String()).GetRegistry()
+
 	instrumentation, err := instrumentation.New(cfg, b.Info.Beat, b.Info.Version)
 	if err != nil {
 		return nil, fmt.Errorf("error setting up instrumentation: %w", err)
@@ -469,11 +471,6 @@ func NewBeatReceiver(settings Settings, receiverConfig map[string]interface{}, c
 		return nil, fmt.Errorf("error creating processors: %w", err)
 	}
 
-	reg := monitoring.Default.GetRegistry(b.Info.Name)
-	if reg == nil {
-		reg = monitoring.Default.NewRegistry(b.Info.Name)
-	}
-
 	// This should be replaced with static config for otel consumer
 	// but need to figure out if we want the Queue settings from here.
 	outputEnabled := b.Config.Output.IsSet() && b.Config.Output.Config().Enabled()
@@ -485,12 +482,12 @@ func NewBeatReceiver(settings Settings, receiverConfig map[string]interface{}, c
 		}
 	}
 
-	tel := reg.GetRegistry("state")
+	tel := b.Beat.MonitorRegistry.GetRegistry("state")
 	if tel == nil {
-		tel = reg.NewRegistry("state")
+		tel = b.Beat.MonitorRegistry.NewRegistry("state")
 	}
 	monitors := pipeline.Monitors{
-		Metrics:   reg,
+		Metrics:   b.Beat.MonitorRegistry,
 		Telemetry: tel,
 		Logger:    logp.L().Named("publisher"),
 		Tracer:    b.Instrumentation.Tracer(),
@@ -510,7 +507,6 @@ func NewBeatReceiver(settings Settings, receiverConfig map[string]interface{}, c
 	b.Publisher = publisher
 
 	return b, nil
-
 }
 
 // InitWithSettings does initialization of things common to all actions (read confs, flags)
@@ -831,11 +827,21 @@ func (b *Beat) RegisterHostname(useFQDN bool) {
 	hostname := b.Info.FQDNAwareHostname(useFQDN)
 
 	// info.hostname
-	infoRegistry := monitoring.GetNamespace("info").GetRegistry()
+	var infoRegistry *monitoring.Registry
+	if b.MonitorRegistry != nil {
+		infoRegistry = b.MonitorRegistry.GetRegistry("info")
+	} else {
+		infoRegistry = monitoring.GetNamespace("info").GetRegistry()
+	}
 	monitoring.NewString(infoRegistry, "hostname").Set(hostname)
 
 	// state.host
-	stateRegistry := monitoring.GetNamespace("state").GetRegistry()
+	var stateRegistry *monitoring.Registry
+	if b.MonitorRegistry != nil {
+		stateRegistry = b.MonitorRegistry.GetRegistry("state")
+	} else {
+		stateRegistry = monitoring.GetNamespace("state").GetRegistry()
+	}
 	monitoring.NewFunc(stateRegistry, "host", host.ReportInfo(hostname), monitoring.Report)
 }
 
