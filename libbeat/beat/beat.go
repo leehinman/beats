@@ -26,6 +26,7 @@ import (
 	"github.com/elastic/elastic-agent-client/v7/pkg/proto"
 	"github.com/elastic/elastic-agent-libs/config"
 	"github.com/elastic/elastic-agent-libs/keystore"
+	"github.com/elastic/elastic-agent-libs/monitoring"
 	"github.com/elastic/elastic-agent-libs/useragent"
 )
 
@@ -84,8 +85,9 @@ type Beat struct {
 
 	Instrumentation instrumentation.Instrumentation // instrumentation holds an APM agent for capturing and reporting traces
 
-	API      *api.Server      // API server. This is nil unless the http endpoint is enabled.
-	Registry *reload.Registry // input, & output registry for configuration manager, should be instantiated in NewBeat
+	API              *api.Server           // API server. This is nil unless the http endpoint is enabled.
+	Registry         *reload.Registry      // input, & output registry for configuration manager, should be instantiated in NewBeat
+	MonitorNamespace *monitoring.Namespace // a monitor namespace that is unique per beat instance
 }
 
 // GenerateUserAgent populates the UserAgent field on the beat.Info struct
