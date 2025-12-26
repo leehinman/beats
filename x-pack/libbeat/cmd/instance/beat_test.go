@@ -6,6 +6,8 @@ package instance
 
 import (
 	"maps"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -18,6 +20,9 @@ import (
 	"github.com/elastic/beats/v7/libbeat/management"
 	"github.com/elastic/beats/v7/x-pack/otel/otelmanager"
 	conf "github.com/elastic/elastic-agent-libs/config"
+	"github.com/elastic/elastic-agent-libs/logp/logptest"
+	"github.com/elastic/elastic-agent-libs/paths"
+	"github.com/elastic/go-ucfg"
 )
 
 func TestManager(t *testing.T) {
@@ -81,4 +86,58 @@ type: "log"`)
 		require.NoError(t, err)
 		assert.False(t, log.AllowDeprecatedUse(cfg))
 	})
+}
+
+func TestSetDefaultHome(t *testing.T) {
+	tests := map[string]struct {
+		modulePrefix string
+		origPathHome string
+		unchanged    bool
+		shouldFail   bool
+		tmpDir       string
+	}{
+		"module dir in cwd":      {tmpDir: t.TempDir()},
+		"module 2 dir below cwd": {modulePrefix: filepath.Join("a", "b"), tmpDir: t.TempDir()},
+		"pathHome set":           {origPathHome: "/a/b", unchanged: true, tmpDir: t.TempDir()},
+		"cwd empty":              {unchanged: true},
+		"too deep":               {modulePrefix: filepath.Join("a", "b", "c", "d", "e"), shouldFail: true, tmpDir: t.TempDir()},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			structCfg := map[string]any{
+				"path.home": tc.origPathHome,
+			}
+			cfOpts := []ucfg.Option{
+				ucfg.PathSep("."),
+				ucfg.ResolveEnv,
+				ucfg.VarExp,
+			}
+			tmp, err := ucfg.NewFrom(structCfg, cfOpts...)
+			require.NoErrorf(t, err, "error making config: %s", err)
+
+			if tc.tmpDir != "" {
+				err = os.MkdirAll(filepath.Join(tc.tmpDir, tc.modulePrefix, "module"), 0o750)
+				require.NoErrorf(t, err, "error making subdirs: %s", err)
+			}
+
+			cfg := (*conf.C)(tmp)
+			setDefaultHome(logptest.NewTestingLogger(t, ""), cfg, tc.tmpDir)
+
+			updatedConfig := struct {
+				Path paths.Path `config:"path"`
+			}{}
+
+			err = cfg.Unpack(&updatedConfig)
+			require.NoError(t, err, "error unpacking updated config: %s", err)
+
+			switch {
+			case tc.unchanged:
+				require.Equal(t, tc.origPathHome, updatedConfig.Path.Home)
+			case tc.shouldFail:
+				require.Equal(t, "", updatedConfig.Path.Home)
+			default:
+				require.Equal(t, filepath.Join(tc.tmpDir, tc.modulePrefix), updatedConfig.Path.Home)
+			}
+		})
+	}
 }

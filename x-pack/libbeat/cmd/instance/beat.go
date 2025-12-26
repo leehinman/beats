@@ -7,6 +7,8 @@ package instance
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -102,6 +104,14 @@ func NewBeatForReceiver(settings instance.Settings, receiverConfig map[string]an
 	}
 
 	cfg := (*config.C)(tmp)
+	cwd, err := os.Getwd()
+	if err != nil {
+		logger.Debug("could not determine current working directory: %s", err)
+		cwd = ""
+	}
+
+	setDefaultHome(logger, cfg, cwd)
+
 	if settings.Name == "filebeat" {
 		partialConfig := struct {
 			Path paths.Path `config:"path"`
@@ -313,4 +323,63 @@ func setLogger(b *instance.Beat, receiverConfig map[string]any, core zapcore.Cor
 	}
 
 	return nil
+}
+
+// setDefaultHome will try to find a suitable home directory if
+// path.home is not set in the configuration.  It will look up to 2
+// directories below the current working directory to find a directory
+// called "module".
+func setDefaultHome(logger *logp.Logger, cfg *config.C, cwd string) {
+	if cwd == "" {
+		return
+	}
+	partialConfig := struct {
+		Path paths.Path `config:"path"`
+	}{}
+
+	if err := cfg.Unpack(&partialConfig); err != nil {
+		logger.Debug("error extracting default paths: %w", err)
+		return
+	}
+	// path.home was set in config, so honor it
+	if partialConfig.Path.Home != "" {
+		return
+	}
+	candidate := findDir(cwd, "module", 0, 2)
+	if candidate == "" {
+		logger.Debug("could not find the modules directory to set home.path")
+		return
+	}
+	partialConfig.Path.Home = candidate
+	err := cfg.Merge(partialConfig)
+	if err != nil {
+		logger.Debug("could not set path.home to '%s': %s", candidate, err)
+		return
+	}
+	logger.Info("path.home set to: '%s'", candidate)
+}
+
+// findDir tries to find the directory that contains "targetDir" by
+// searching recursively from "currentDir".  It ignores errors to try
+// as many directories as possible.
+func findDir(currentDir string, targetDir string, currentDepth int, maxDepth int) string {
+	if currentDepth > maxDepth {
+		return ""
+	}
+	entries, err := os.ReadDir(currentDir)
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if entry.Name() == targetDir && entry.IsDir() {
+			return currentDir
+		}
+		if entry.IsDir() {
+			candidate := findDir(filepath.Join(currentDir, entry.Name()), targetDir, currentDepth+1, maxDepth)
+			if candidate != "" {
+				return candidate
+			}
+		}
+	}
+	return ""
 }
